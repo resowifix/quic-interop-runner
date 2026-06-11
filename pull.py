@@ -34,7 +34,7 @@ else:
     implementations = impls
 
 print("Pulling the simulator...")
-os.system("docker pull martenseemann/quic-network-simulator")
+os.system("docker pull resowifix/sim")
 
 if args.protocol == "quic":
     print("\nPulling the iperf endpoint...")

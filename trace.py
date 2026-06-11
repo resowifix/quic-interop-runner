@@ -103,6 +103,7 @@ class TraceAnalyzer:
             override_prefs["tls.keylog_file"] = self._keylog_file
         cap = pyshark.FileCapture(
             self._filename,
+            tshark_path="/home/broisou/Documents/stage/wireshark/build/run/tshark",
             display_filter=f,
             override_prefs=override_prefs,
             disable_protocol="http3",  # see https://github.com/quic-interop/quic-interop-runner/pull/179

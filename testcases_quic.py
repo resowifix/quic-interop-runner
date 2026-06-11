@@ -1324,6 +1324,118 @@ class TestCaseV2(TestCaseQuic):
         return set([hex(int(p.version, 0)) for p in packets])
 
 
+class TestCaseFlexicastHandshake(TestCaseQuic):
+    @staticmethod
+    def name():
+        return "flexicast-handshake"
+
+    @staticmethod
+    def abbreviation():
+        return "FcH"
+    
+    @staticmethod
+    def desc():
+        return "Client should send a ClientHello in two frames or more."
+
+    @staticmethod
+    def scenario() -> str:
+        """Scenario for the ns3 simulator"""
+        return "flexicast --delay=15ms --bandwidth=10Mbps --queue=25"
+    
+    def get_paths_raw(self):
+        self._files = [self._generate_random_file(1 * KB)]
+        return self._files
+    
+    def get_paths_server(self):
+        return self._files
+
+    def check(self) -> TestResult:
+        super().check()
+        if not self._keylog_file():
+            logging.info("Can't check test result. SSLKEYLOG required.")
+            return TestResult.UNSUPPORTED
+
+        server_msg = self._client_trace().get_raw_packets(Direction.FROM_SERVER)
+        client_msg = self._server_trace().get_raw_packets(Direction.FROM_CLIENT)
+        server_packets = []
+        client_packets = []
+        for m in server_msg:
+            for layer in m.layers:
+                if layer.layer_name == "quic":
+                    server_packets.append(layer)
+        for m in client_msg:
+            for layer in m.layers:
+                if layer.layer_name == "quic":
+                    client_packets.append(layer)
+        fc_handshake = {}
+        for p in server_packets:
+            if hasattr(p, "fc_flow_id"):
+                flow_id = p.fc_flow_id
+                if hasattr(p, "fc_grp_addr"):
+                    if flow_id in fc_handshake:
+                        logging.info(
+                           "Expected only one FC_ANNOUNCE per flow: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    fc_handshake[flow_id] = {"announce":1, "join":0, "key":0, "listen":0}
+                elif hasattr(p, "fc_key"):
+                    if flow_id not in fc_handshake:
+                        logging.info(
+                           "Got a FC_KEY before any FC_ANNOUNCE: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    if fc_handshake[flow_id]["key"]:
+                        logging.info(
+                           "Expected only one FC_KEY per flow: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    fc_handshake[flow_id]["key"] = 1
+        for p in client_packets:
+            if hasattr(p, "fc_flow_id"):
+                flow_id = p.fc_flow_id
+                if hasattr(p, "fc_action"):
+                    action = p.fc_action
+                    if flow_id not in fc_handshake:
+                        logging.info(
+                           "Got a FC_STATE before any FC_ANNOUNCE: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    if action == "1":
+                        if fc_handshake[flow_id]["join"]:
+                            logging.info(
+                                "Expected only one FC_STATE join per flow: %s", fc_handshake
+                            )
+                            return TestResult.FAILED
+                        fc_handshake[flow_id]["join"] = 1
+                    elif action == "4":
+                        if fc_handshake[flow_id]["listen"]:
+                            logging.info(
+                                "Expected only one FC_STATE listen per flow: %s", fc_handshake
+                            )
+                            return TestResult.FAILED
+                        fc_handshake[flow_id]["listen"] = 1
+                    else:
+                        logging.info(
+                            "Unxpected FC_STATE action %s.", action
+                        )
+                        return TestResult.FAILED
+                else:
+                    return TestResult.FAILED
+        if len(fc_handshake) != 1:
+            logging.info(
+                "Expected only one flexicast handshake: %s", fc_handshake
+            )
+            return TestResult.FAILED
+        for flow_id in fc_handshake:
+            h = fc_handshake[flow_id]
+            if not (h["announce"] and h["join"] and h["key"] and h["listen"]):
+                logging.info(
+                    "Expected a complete flexicast handshake: %s", fc_handshake
+                )
+                return TestResult.FAILED
+        return TestResult.SUCCEEDED
+
+
 class MeasurementGoodput(Measurement):
     FILESIZE = 10 * MB
     _result = 0.0
@@ -1440,6 +1552,7 @@ TESTCASES_QUIC = [
     TestCasePortRebinding,
     TestCaseAddressRebinding,
     TestCaseConnectionMigration,
+    TestCaseFlexicastHandshake,
 ]
 
 MEASUREMENTS = [

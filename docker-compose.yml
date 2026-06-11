@@ -1,6 +1,6 @@
 services:
   sim:
-    image: martenseemann/quic-network-simulator
+    image: resowifix/sim
     container_name: sim
     hostname: sim
     stdin_open: true

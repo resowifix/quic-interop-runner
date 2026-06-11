@@ -15,7 +15,7 @@
     "role": "both"
   },
   "quiche": {
-    "image": "cloudflare/quiche-qns:latest",
+    "image": "resowifix/quiche_fc:latest",
     "url": "https://github.com/cloudflare/quiche",
     "role": "both"
   },
@@ -25,7 +25,7 @@
     "role": "both"
   },
   "picoquic": {
-    "image": "privateoctopus/picoquic:latest",
+    "image": "resowifix/picoquic_fc:latest",
     "url": "https://github.com/private-octopus/picoquic",
     "role": "both"
   },
