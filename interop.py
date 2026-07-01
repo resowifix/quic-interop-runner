@@ -375,6 +375,26 @@ class InteropRunner:
                 r.stdout.decode("utf-8", errors="replace"),
             )
 
+    def _copy_keylogs(self, container: str, dir: tempfile._TemporaryFileWrapper):
+        cmd = (
+            "docker cp \"$(docker ps -a --format '{{.ID}} {{.Names}}' | awk '/^.* "
+            + container
+            + "$/ {print $1}')\":/logs/keys.log "
+            + dir.name
+        )
+        r = subprocess.run(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if r.returncode != 0:
+            logging.info(
+                "Copying logs from %s failed: %s",
+                container,
+                r.stdout.decode("utf-8", errors="replace"),
+            )
+
     def _run_testcase(
         self, server: str, client: str, test: Callable[[], testcases_quic.TestCase]
     ) -> TestResult:
@@ -391,6 +411,8 @@ class InteropRunner:
         sim_log_dir = tempfile.TemporaryDirectory(dir="/tmp", prefix="logs_sim_")
         server_log_dir = tempfile.TemporaryDirectory(dir="/tmp", prefix="logs_server_")
         client_log_dir = tempfile.TemporaryDirectory(dir="/tmp", prefix="logs_client_")
+        fc_client_log_dir = tempfile.TemporaryDirectory(dir="/tmp", prefix="logs_fc_client_")
+        key_log_file = tempfile.NamedTemporaryFile(dir="/tmp", prefix="keylog_")
         log_file = tempfile.NamedTemporaryFile(dir="/tmp", prefix="output_log_")
         log_handler = logging.FileHandler(log_file.name)
         log_handler.setLevel(logging.DEBUG)
@@ -491,11 +513,16 @@ class InteropRunner:
             if self._is_unsupported(lines):
                 status = TestResult.UNSUPPORTED
             elif client_exited_ok or server_exited_ok:
+                for c in test._other_keylog_file:
+                    self._copy_keylogs(c, key_log_file)
+                    os.system("cat " + key_log_file.name + " >> " + client_log_dir.name + "/keys.log")
                 try:
                     status = test.check()
                 except FileNotFoundError as e:
                     logging.error(f"testcase.check() threw FileNotFoundError: {e}")
                     status = TestResult.FAILED
+
+        test._other_keylog_file = []
 
         # save logs
         logging.getLogger().removeHandler(log_handler)

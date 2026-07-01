@@ -1,6 +1,6 @@
 services:
   sim:
-    image: resowifix/sim
+    image: resowifix/sim-fc
     container_name: sim
     hostname: sim
     stdin_open: true
@@ -18,6 +18,10 @@ services:
         ipv4_address: 193.167.0.2
         ipv6_address: fd00:cafe:cafe:0::2
         interface_name: eth0
+      meluchnet:
+        ipv4_address: 193.167.1.2
+        ipv6_address: fd00:cafe:cafe:1::2
+        interface_name: eth2
       rightnet:
         ipv4_address: 193.167.100.2
         ipv6_address: fd00:cafe:cafe:100::2
@@ -95,6 +99,42 @@ services:
       - "server46:193.167.100.100"
       - "server46:fd00:cafe:cafe:100::100"
 
+  client_fc:
+    image: $CLIENT
+    container_name: client_fc
+    hostname: client_fc
+    stdin_open: true
+    tty: true
+    volumes:
+      - $CLIENT_WWW:/www:ro
+      - $CLIENT_DOWNLOADS:/downloads:delegated
+      - $CERTS:/certs:ro
+    environment:
+      - CRON=$CRON
+      - ROLE=client
+      - CLIENT_PARAMS=$CLIENT_PARAMS
+      - SSLKEYLOGFILE=/logs/keys.log
+      - QLOGDIR=/logs/qlog/
+      - TESTCASE=$TESTCASE_CLIENT
+      - REQUESTS=$REQUESTS_CLIENT
+      - PROTOCOLS=$PROTOCOLS_CLIENT
+    depends_on:
+      - sim
+    cap_add:
+      - NET_ADMIN
+    ulimits:
+      memlock: 67108864
+    networks:
+      meluchnet:
+        ipv4_address: 193.167.1.100
+        ipv6_address: fd00:cafe:cafe:1::100
+        interface_name: eth0
+    extra_hosts:
+      - "server4:193.167.100.100"
+      - "server6:fd00:cafe:cafe:100::100"
+      - "server46:193.167.100.100"
+      - "server46:fd00:cafe:cafe:100::100"
+
   iperf_server:
     image: martenseemann/quic-interop-iperf-endpoint
     container_name: iperf_server
@@ -150,6 +190,15 @@ networks:
       config:
         - subnet: 193.167.0.0/24
         - subnet: fd00:cafe:cafe:0::/64
+  meluchnet:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: 'false'
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 193.167.1.0/24
+        - subnet: fd00:cafe:cafe:1::/64
   rightnet:
     driver: bridge
     driver_opts:

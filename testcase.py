@@ -74,10 +74,13 @@ class TestCase(abc.ABC):
     _files = []
     _client_keylog_file = None
     _server_keylog_file = None
+    _fc_client_keylog_file = None
+    _other_keylog_file = []
     _sim_log_dir = None
     _cert_dir = None
     _cached_server_trace = None
     _cached_client_trace = None
+    _cached_fc_client_trace = None
     _client_www_dir = None
     _client_download_dir = None
     _server_www_dir = None
@@ -88,9 +91,13 @@ class TestCase(abc.ABC):
         sim_log_dir: tempfile.TemporaryDirectory,
         client_keylog_file: str,
         server_keylog_file: str,
+        fc_client_keylog_file = None,
+        other_keylog_file = [],
     ):
         self._server_keylog_file = server_keylog_file
         self._client_keylog_file = client_keylog_file
+        self._fc_client_keylog_file = fc_client_keylog_file
+        self._other_keylog_file = other_keylog_file
         self._files = []
         self._sim_log_dir = sim_log_dir
 
@@ -128,8 +135,8 @@ class TestCase(abc.ABC):
     def additional_envs() -> List[str]:
         return [""]
 
-    @staticmethod
-    def additional_containers() -> List[str]:
+    #@staticmethod
+    def additional_containers(self) -> List[str]:
         return [""]
 
     def client_www_dir(self):
@@ -177,20 +184,25 @@ class TestCase(abc.ABC):
                 return False
         return True
 
-    def _keylog_file(self) -> str:
-        if self._is_valid_keylog(self._client_keylog_file):
+    def _keylog_file(self, is_fc_client=0) -> str:
+        if is_fc_client:
+            client_trace = self._fc_client_keylog_file
+        else:
+            client_trace = self._client_keylog_file
+
+        if self._is_valid_keylog(client_trace):
             logging.debug("Using the client's key log file.")
-            return self._client_keylog_file
+            return client_trace
         elif self._is_valid_keylog(self._server_keylog_file):
             logging.debug("Using the server's key log file.")
             return self._server_keylog_file
         logging.debug("No key log file found.")
 
-    def _inject_keylog_if_possible(self, trace: str):
+    def _inject_keylog_if_possible(self, trace: str, is_fc_client=0):
         """
         Inject the keylog file into the pcap file if it is available and valid.
         """
-        keylog = self._keylog_file()
+        keylog = self._keylog_file(is_fc_client)
         if keylog is None:
             return
 
@@ -219,6 +231,13 @@ class TestCase(abc.ABC):
             self._inject_keylog_if_possible(trace)
             self._cached_server_trace = TraceAnalyzer(trace, self._keylog_file())
         return self._cached_server_trace
+    
+    def _fc_client_trace(self):
+        if self._cached_fc_client_trace is None:
+            trace = self._sim_log_dir.name + "/trace_node_meluch.pcap"
+            self._inject_keylog_if_possible(trace)
+            self._cached_fc_client_trace = TraceAnalyzer(trace, self._keylog_file())
+        return self._cached_fc_client_trace
 
     def _generate_random_file(
         self, size: int, filename: str = None, directory: str = None

@@ -10,6 +10,8 @@ from trace import (
     PacketType,
     get_direction,
     get_packet_type,
+    IP4_SERVER,
+    IP6_SERVER,
 )
 from typing import List, Tuple
 
@@ -1360,10 +1362,12 @@ class TestCaseFlexicastHandshake(TestCaseQuic):
         server_packets = []
         client_packets = []
         for m in server_msg:
+            #print(m)
             for layer in m.layers:
                 if layer.layer_name == "quic":
                     server_packets.append(layer)
         for m in client_msg:
+            #print(m)
             for layer in m.layers:
                 if layer.layer_name == "quic":
                     client_packets.append(layer)
@@ -1435,6 +1439,130 @@ class TestCaseFlexicastHandshake(TestCaseQuic):
                 return TestResult.FAILED
         return TestResult.SUCCEEDED
 
+class TestCaseDoubleFlexicastHandshake(TestCaseQuic):
+    @staticmethod
+    def name():
+        return "flexicast-double-handshake"
+
+    @staticmethod
+    def abbreviation():
+        return "FcDH"
+    
+    @staticmethod
+    def desc():
+        return "Client should send a ClientHello in two frames or more."
+
+    @staticmethod
+    def scenario() -> str:
+        """Scenario for the ns3 simulator"""
+        return "multi-client-flexicast --delay=15ms --bandwidth=10Mbps --queue=25 --rate_to_server=30 --rate_to_client=30 --burst_to_server=3 --burst_to_client=3"
+    
+    def get_paths_raw(self):
+        self._files = [self._generate_random_file(1 * KB)]
+        return self._files
+    
+    def get_paths_server(self):
+        return self._files
+    
+    #@staticmethod
+    def additional_containers(self) -> List[str]:
+        self._other_keylog_file.append("client_fc")
+        return ["client_fc"]
+
+    def check(self) -> TestResult:
+        super().check()
+        if not self._keylog_file():
+            logging.info("Can't check test result. SSLKEYLOG required.")
+            return TestResult.UNSUPPORTED
+
+        server_msg = self._client_trace().get_raw_packets(Direction.FROM_SERVER) + self._fc_client_trace().get_raw_packets(Direction.FROM_SERVER)
+        client_msg = self._client_trace()._get_packets("quic && ip.dst==" + IP4_SERVER + " || ipv6.dst==" + IP6_SERVER) \
+            + self._fc_client_trace()._get_packets("quic && ip.dst==" + IP4_SERVER + " || ipv6.dst==" + IP6_SERVER)
+        server_packets = []
+        client_packets = []
+        for m in server_msg:
+            for layer in m.layers:
+                if layer.layer_name == "quic":
+                    server_packets.append(layer)
+        for m in client_msg:
+            for layer in m.layers:
+                if layer.layer_name == "quic":
+                    client_packets.append(layer)
+        fc_handshake = {}
+        for p in server_packets:
+            if hasattr(p, "fc_flow_id"):
+                key = (p.dcid, p.fc_flow_id)
+                if hasattr(p, "fc_grp_addr"):
+                    if p.dcid in fc_handshake:
+                        logging.info(
+                           "Expected only one FC_ANNOUNCE per connection and flow_id: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    fc_handshake[key] = {"announce":1, "join":0, "key":0, "listen":0, "answered":0}
+                elif hasattr(p, "fc_key"):
+                    if key not in fc_handshake:
+                        logging.info(
+                           "Got a FC_KEY before any FC_ANNOUNCE: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    if fc_handshake[key]["key"]:
+                        logging.info(
+                           "Expected only one FC_KEY per connection and flow: %s", fc_handshake
+                        )
+                        return TestResult.FAILED
+                    fc_handshake[key]["key"] = 1
+        dcid_scid = {}
+        for p in client_packets:
+            if hasattr(p, "fc_flow_id"):
+                flow_id = p.fc_flow_id
+                if hasattr(p, "fc_action"):
+                    action = p.fc_action
+                    if p.dcid not in dcid_scid:
+                        for dcid, fid in fc_handshake:
+                            if flow_id == fid and fc_handshake[(dcid, fid)]["answered"] == 0:
+                                fc_handshake[(dcid, fid)]["answered"] = 1
+                                dcid_scid[p.dcid] = dcid
+                                break
+                        if p.dcid not in dcid_scid:
+                            logging.info(
+                                "Got a FC_STATE before any FC_ANNOUNCE: %s", fc_handshake
+                            )
+                            return TestResult.FAILED
+                    key = (dcid_scid[p.dcid], flow_id)
+                    if action == "1":
+                        if fc_handshake[key]["join"]:
+                            logging.info(
+                                "Expected only one FC_STATE join per flow: %s", fc_handshake
+                            )
+                            return TestResult.FAILED
+                        fc_handshake[key]["join"] = 1
+                    elif action == "4":
+                        if fc_handshake[key]["listen"]:
+                            logging.info(
+                                "Expected only one FC_STATE listen per flow: %s", fc_handshake
+                            )
+                            return TestResult.FAILED
+                        fc_handshake[key]["listen"] = 1
+                    else:
+                        logging.info(
+                            "Unxpected FC_STATE action %s.", action
+                        )
+                        return TestResult.FAILED
+                else:
+                    return TestResult.FAILED
+        if len(fc_handshake) != 2:
+            logging.info(
+                "Expected only one flexicast handshake: %s", fc_handshake
+            )
+            return TestResult.FAILED
+        for flow_id in fc_handshake:
+            h = fc_handshake[flow_id]
+            if not (h["announce"] and h["join"] and h["key"] and h["listen"]):
+                logging.info(
+                    "Expected a complete flexicast handshake: %s", fc_handshake
+                )
+                return TestResult.FAILED
+        return TestResult.SUCCEEDED
 
 class MeasurementGoodput(Measurement):
     FILESIZE = 10 * MB
@@ -1524,8 +1652,8 @@ class MeasurementCrossTraffic(MeasurementGoodput):
     def additional_envs() -> List[str]:
         return ["IPERF_CONGESTION=cubic"]
 
-    @staticmethod
-    def additional_containers() -> List[str]:
+    #@staticmethod
+    def additional_containers(self) -> List[str]:
         return ["iperf_server", "iperf_client"]
 
 
@@ -1553,6 +1681,7 @@ TESTCASES_QUIC = [
     TestCaseAddressRebinding,
     TestCaseConnectionMigration,
     TestCaseFlexicastHandshake,
+    TestCaseDoubleFlexicastHandshake,
 ]
 
 MEASUREMENTS = [
